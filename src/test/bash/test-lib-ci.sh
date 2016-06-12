@@ -130,3 +130,112 @@ chmod +x .test_lib_ci_atexit_fail.sh
 WVPASS ./.test_lib_ci_atexit_fail.sh
 WVPASS [ ! -e .made_by_atexit ]
 rm .test_lib_ci_atexit_fail.sh
+
+# test which_sbt
+
+# which_sbt when SBT is set uses SBT
+SBT="/invalid/path/beforeset"
+ORIGSBT=$SBT
+which_sbt
+WVPASS [ "${SBT}" = "${ORIGSBT}" ]
+unset SBT
+unset ORIGSBT
+
+# test which_sbt when SBT is not set, and SBT_PREFER_SYSTEM_SBT_IF_AVAILABLE is not set
+unset SBT_PREFER_SYSTEM_SBT_IF_AVAILABLE
+
+TMPPATH=$( Mktemp_Portable dir )
+touch $TMPPATH/sbt
+chmod +x $TMPPATH/sbt
+
+pushd $TMPPATH
+
+unset SBT
+which_sbt
+WVPASS [ "${SBT}" = "./sbt" ]
+
+popd
+
+rm -rf $TMPPATH
+unset TMPPATH
+unset SBT
+
+# test which_sbt when SBT is not set, and SBT_PREFER_SYSTEM_SBT_IF_AVAILABLE is set but system SBT is not available and project sbt is available
+SBT_PREFER_SYSTEM_SBT_IF_AVAILABLE=1
+
+TMPPATH=$( Mktemp_Portable dir )
+
+# Setup a fake sbt path
+touch $TMPPATH/sbt
+chmod +x $TMPPATH/sbt
+
+pushd $TMPPATH
+
+unset SBT
+PATH="" which_sbt
+WVPASS [ "${SBT}" = "./sbt" ]
+
+popd
+
+rm -rf $TMPPATH
+unset TMPPATH
+unset SBT
+unset SBT_PREFER_SYSTEM_SBT_IF_AVAILABLE
+
+# test which_sbt when SBT is not set, and SBT_PREFER_SYSTEM_SBT_IF_AVAILABLE is set by system SBT is available and project sbt is available
+SBT_PREFER_SYSTEM_SBT_IF_AVAILABLE=1
+
+ORIG_PATH=$PATH
+
+TMPPATH=$( Mktemp_Portable dir )
+TMPPROJ=$( Mktemp_Portable dir )
+
+PATH=$TMPPATH:$ORIG_PATH
+
+# Setup a fake sbt path
+touch $TMPPROJ/sbt
+chmod +x $TMPPROJ/sbt
+touch $TMPPATH/sbt
+chmod +x $TMPPATH/sbt
+
+pushd $TMPPROJ
+
+unset SBT
+which_sbt
+WVPASS [ "${SBT}" = $TMPPATH/sbt ]
+
+popd
+
+PATH=$ORIG_PATH
+rm -rf $TMPPATH $TMPPROJ
+unset TMPPATH
+unset TMPPROJ
+unset SBT_PREFER_SYSTEM_SBT_IF_AVAILABLE
+unset SBT
+
+# test which_sbt when SBT is not set, and SBT_PREFER_SYSTEM_SBT_IF_AVAILABLE is set by system SBT is available and project sbt is unavailable
+SBT_PREFER_SYSTEM_SBT_IF_AVAILABLE=1
+
+ORIG_PATH=$PATH
+
+TMPPATH=$( Mktemp_Portable dir )
+TMPPROJ=$( Mktemp_Portable dir )
+
+PATH=$TMPPATH:$ORIG_PATH
+
+# Setup a fake sbt path
+touch $TMPPATH/sbt
+chmod +x $TMPPATH/sbt
+
+pushd $TMPPROJ
+unset SBT
+which_sbt
+WVPASS [ "${SBT}" = $TMPPATH/sbt ]
+popd
+
+PATH=$ORIG_PATH
+rm -rf $TMPPATH $TMPPROJ
+unset TMPPATH
+unset TMPPROJ
+unset SBT_PREFER_SYSTEM_SBT_IF_AVAILABLE
+unset SBT
