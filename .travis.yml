@@ -1,0 +1,25 @@
+language: ruby
+
+rvm:
+  - 2.2.0
+
+cache:
+  directories:
+    - $HOME/.ivy2
+    - $HOME/.m2
+
+before_script:
+  - gem install bashcov
+  - gem install coveralls
+
+script:
+  - bashcov -- ./src/test/bash/run-tests.sh
+  - ./src/main/bash/setup-version.sh
+  - RELEASE_TGZ=/tmp/ci-$(cat VERSION).tar.gz
+  - tar cvfz ${RELEASE_TGZ} --transform 's/^src\/main\/bash/ci/' src/main/bash
+  - tar xvzf ${RELEASE_TGZ} -C /tmp
+  - ./src/main/bash/artifactory-release.sh public-binaries/ci ${RELEASE_TGZ}
+
+env:
+  global:
+    - secure: "Py7MNlp8VagQTpcTMX0O/MbKHp/EYOHuksvutthSg/NrgA+lW5RRplBda2wTS+gl+OL5yiItq9rNUloG5Gws9BSDILonGT4t5dzzGczVvvlfgVila3N+xyTCTszcyNLz9+CXowB9ZzgbrO0Kypt05CQD2UcsuswR6pz+N8HSV+/2GrTBx1Ike1Y4I8pvnJBWP/Mw/hSbvzQFxBSDGV6vJc9ok0vTKjH09zdSrWG+isHl3R+CyBu7MdG8IhC4YvJLhePnVM/BPEEEhXQxJHMz722rVhZWyU2C+1yuqNc7ygpAJ3dlBo7dcsFpJrAyqzZR/Bpl/JpvP/mmgqwDSnk7AUYzwG/83yKNq9WPViH+fioADJSmyAbnwpCJD18RKSE4B0nAhmGtbULZCG3loBNG9wKo08djc0bQ7GK80/ifVrvljcX70HfhlozJmekTTHaNG6FbEVcNr6qjPY0tLKWvSKhuicDvMnlXOWsGT28ahJM6nRTYS+ZyC/uLNnDFcMz4PxGkYwZTs9BTBRTFvpzBwDJFlzhd7qyAHQJa5z0lnaTi1vkEAaMFUDAHdX4Vho9VhlYBXnIy74G4JljOLv7FrNDRoQJQ4vGMKHaQFY9moI2W90EIzLYoXG49OqKIVynEuZfff4gXODG8DJvkUj3xWwTZjHagMMwbpSD4sGU/GVE=" 

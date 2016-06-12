@@ -1,0 +1,14 @@
+/project/target
+/project/project/
+/project/project/target
+/project/source.scala
+boot
+dependency
+target
+metastore_db
+derby.log
+.idea
+.idea_modules
+.ensime
+.ensime_cache
+.drone.sec.yml

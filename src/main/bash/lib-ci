@@ -1,0 +1,362 @@
+#!/bin/bash
+#   Copyright 2014 Commonwealth Bank of Australia
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+
+# Library functions for CI
+
+set -o nounset
+
+# Echo command which outputs to stderr for high visibility on CI which does
+# colorization.
+function echoerr() {
+    echo "$@" 1>&2
+}
+
+# The following set of hooks allow you to inline defer function and method calls
+# in bash until the script terminates. It *requires* a line like 
+# `trap "atexit_commands" INT TERM EXIT` in the body of the bash script in order to 
+# work. Functions are a stack, and are executed in reverse order.
+# Typical usage:
+# trap "atexit_commands ; exit 0" INT TERM EXIT
+# atexit echo "This is run at exit"
+export atexit_hooks=()
+function atexit() {
+    val=$(echo "$@")
+    atexit_hooks+=("$val")
+}
+
+function atexit_commands() {
+    if [ -z "$TEST_DEBUG" ]; then
+        echoerr "Running shutdown hooks..."
+        for ((i=${#atexit_hooks[@]}-1; i >=0 ; i--)); do
+            echoerr "${atexit_hooks[$i]}"
+            eval "${atexit_hooks[$i]}"
+            # Blank elements don't eval to anything, so are removed.
+            atexit_hooks[$i]='' 
+        done
+    fi
+}
+
+# Parses a URL to extract the hostname
+function Hostname_From_Url() {
+    # Do we have a scheme?
+    scheme=$(echo $1 | grep -o '^\w*://')
+    if [ ! -z $scheme ]; then
+        # Get the hostname part.
+        echo $1 | cut -d'/' -f3
+    else
+        # Probably a bare hostname, but remove slashes and things just in case.
+        echo $1 | cut -d'/' -f1
+    fi
+}
+
+# Determine the current CI environment
+function CI_Env_Get() {
+    if [ "$TRAVIS" = "true" ]; then
+        CI_SYSTEM=TRAVIS
+    elif [ "$DRONE" = "true" ]; then
+        CI_SYSTEM=DRONE
+    elif [ ! -z "$ENABLE_LOCAL_CI" ]; then
+        echo "ENABLE_LOCAL_CI is set - Assuming Local." 1>&2
+        CI_SYSTEM=LOCAL
+    else
+        echo "CI System could not be identified." 1>&2
+    fi
+    echo $CI_SYSTEM
+}
+
+# Export CI environment to the common format
+function CI_Env_Adapt() {
+    local CI_SYSTEM=$1
+
+    case $CI_SYSTEM in
+    TRAVIS)
+        CI_NAME=travis
+        CI_REPO=$TRAVIS_REPO_SLUG
+        CI_BRANCH=$TRAVIS_BRANCH
+        CI_COMMIT=$TRAVIS_COMMIT
+        CI_BUILD_NUMBER=$TRAVIS_BUILD_NUMBER
+        CI_PULL_REQUEST=$TRAVIS_PULL_REQUEST
+        CI_JOB_NUMBER=$TRAVIS_JOB_NUMBER
+        CI_BUILD_DIR=$TRAVIS_BUILD_DIR
+        CI_BUILD_URL="https://travis-ci.org/$TRAVIS_REPO_SLUG/builds/$TRAVIS_BUILD_ID"
+        CI_TAG=$TRAVIS_TAG
+        ;;
+    DRONE)
+        CI_NAME=drone
+        CI_REPO=$DRONE_REPO
+        CI_BRANCH=$DRONE_BRANCH
+        CI_COMMIT=$DRONE_COMMIT
+        CI_BUILD_NUMBER=$DRONE_BUILD_NUMBER
+        CI_PULL_REQUEST=${DRONE_PULL_REQUEST:-false}
+        CI_JOB_NUMBER=$DRONE_JOB_NUMBER
+        CI_BUILD_DIR=$DRONE_BUILD_DIR
+        CI_BUILD_URL=$DRONE_BUILD_URL
+        CI_TAG=$DRONE_TAG
+        ;;
+    LOCAL)
+        if [ ! -z "$ENABLE_LOCAL_CI" ]; then
+            # This is here because we want monotonically increasing job and build
+            # numbers, but we have no real way to get them. Using the date like this
+            # is a good compromise for local use.
+
+            # The default values ${LOCAL...:-} are to support test overrides
+            referenceTime=$(date +%Y%m%d%H%M%S)
+            CI_NAME=local
+            CI_REPO=${LOCAL_REPO:-$(dirname $(pwd))}
+            CI_BRANCH=${LOCAL_BRANCH:-$(git symbolic-ref HEAD | cut -d'/' -f3-)}
+            CI_COMMIT=${LOCAL_COMMIT:-$(git rev-parse HEAD)}
+            CI_BUILD_NUMBER=${LOCAL_BUILD_NUMBER:-$referenceTime}
+            CI_PULL_REQUEST=${LOCAL_PULL_REQUEST:-false}
+            CI_JOB_NUMBER=${LOCAL_JOB_NUMBER:-$referenceTime}
+            CI_BUILD_DIR=${LOCAL_BUILD_DIR:-$(pwd)}
+            CI_BUILD_URL=${LOCAL_BUILD_URL:-""}
+            CI_TAG=${LOCAL_TAG:-$(git name-rev --name-only --tags HEAD | sed 's/^undefined$//')}
+        else
+            echo "CI System could not be identified. Failing." 1>&2
+            exit 1
+        fi
+        ;;
+    *)
+        echo "CI System could not be identified. Failing." 1>&2
+        exit 1
+        ;;
+    esac
+}
+
+# Dump the CI environment to stdout
+function CI_Env_Dump() {
+    CI_Env_Adapt $(CI_Env_Get)
+    echo "CI_NAME=$CI_NAME"
+    echo "CI_REPO=$CI_REPO"
+    echo "CI_BRANCH=$CI_BRANCH"
+    echo "CI_COMMIT=$CI_COMMIT"
+    echo "CI_BUILD_NUMBER=$CI_BUILD_NUMBER"
+    echo "CI_PULL_REQUEST=$CI_PULL_REQUEST"
+    echo "CI_JOB_NUMBER=$CI_JOB_NUMBER"
+    echo "CI_BUILD_DIR=$CI_BUILD_DIR"
+    echo "CI_BUILD_URL=$CI_BUILD_URL"
+    echo "CI_TAG=$CI_TAG"
+}
+
+# Get a version number based on the Omnia standard:
+# major.minor.path-commish-timestamp for master branch
+# major.minor.path-commish-timestamp-PRNN for pull request NN
+# major.minor.path-commish-timestamp-branchname for branch branchname.
+# Expects the source version number to be input.
+function Version_Get() {
+    CI_Env_Adapt $(CI_Env_Get)
+
+    local source_version=$(echo "$1" | grep -E -o "[0-9]+\.[0-9]+\.[0-9]+")
+    if [ -z $source_version ]; then
+        echo "Bad semantic version number. Version contents: $1" 1>&2
+        exit 1
+    fi
+
+    local branch=${CI_BRANCH//[^[:alnum:]_.-]/_}
+    local ts=$(date "+%Y%m%d%H%M%S")
+    local commitish=${CI_COMMIT:0:7}
+    local version="$source_version-$ts-$commitish"
+    
+    if [ "$CI_PULL_REQUEST" != "false" ] && [ ! -z $CI_PULL_REQUEST ]; then
+        echo "$version-PR$CI_PULL_REQUEST"
+    elif [ $CI_BRANCH == "master" ]; then
+        echo "$version"
+    else
+        echo "$version-$branch"
+    fi
+}
+
+# Generate a new VERSION file
+# Will check for the VERSION file existing. Errors if not found
+function Version_Write_New() {
+  if [[ ! -f ${PWD}/VERSION ]]; then
+      echo "${PWD}/VERSION file not found." 1>&2
+      exit 1
+  fi
+
+  new_version=$(Version_Get $(cat VERSION))
+  if [[ -z $new_version ]]; then
+      exit 1
+  fi
+  echo "Version Mapped: $version => $new_version"
+  echo "$new_version" > VERSION
+  VERSION=$new_version
+}
+
+
+# Checks if we are on a release branch.
+# Returns 0 iff we are on a release branch and 1 otherwise.
+# Master is a release branch by default.
+function Is_Release() {
+    CI_Env_Adapt $(CI_Env_Get)
+
+    if [[ $CI_BRANCH == "master" && $CI_PULL_REQUEST == false ]]; then
+      echo 0
+    elif [[ $CI_PULL_REQUEST == false && $(Is_In_List "$CI_BRANCH" "${RELEASE_BRANCHES}") ]]; then
+        echo 0
+    else
+        echo 1
+    fi
+}
+
+#
+# Looks for 'item' in a 'string list of items item'
+#
+function Is_In_List() {
+  local item=$1;
+  local stringList=$2
+  echo $stringList | tr ' ' '\n' | grep -e "^${item}$"
+}
+
+# Check if a given input (argument 1) is in the list of arguments passed that
+# succeed it. Example usage: Array_Contains "needle" "${HAYSTACK[@]}"
+# Returns 0 if the value is found, 1 if not.
+Array_Contains () {
+    local seeking="$1"; shift
+    local in=1
+    for element; do
+        if [[ "$element" == "$seeking" ]]; then
+            in=0
+            break
+        fi
+    done
+    echo $in
+}
+
+# Publishes a given subdirectory to a specific branch in the currently checked
+# out git repository. i.e. the contents of <subdirectory> become the root
+# contents of <branch>. If [remote] is not specified, the current remote is
+# used (typically origin).
+# <subdirectory> is assumed to be related to the current working directory.
+# Usage: Publish_Subdirectory_To_Branch <branch> <subdirectory> <commit msg> [remote]
+Publish_Subdirectory_To_Branch() {
+    local git_branch="$1"
+    local input_directory="$2"
+    local commit_msg="$3"
+    local remote="$4"
+    
+    local directory="$(readlink_f $input_directory)"
+
+    if [ -z "$remote" ]; then
+        # Figure out a default remote, or fail.
+        remote=$(git remote -v | cut -f2 | cut -d' ' -f1 | head -n1)
+        if [ -z $remote ]; then
+            echoerr "No git remote could be identified and none specified. Aborting."
+            exit 1
+        fi
+    fi
+    
+    if [ -z "$git_branch" ]; then
+        echoerr "No git branch specified. Aborting."
+        exit 1
+    fi
+    
+    # Set git configuration if it is not already set.
+    if [ -z "$(git config --global user.email)" ]; then
+        git config --global user.email ci@ci
+    fi
+
+    if [ -z "$(git config --global user.name)" ]; then
+        git config --global user.name Publish_Subdirectory_To_Branch
+    fi
+    
+    # Don't mess up .git dir branch state in real work dir - store where we were
+    # Only relevant for local testers.
+    ORIG_BRANCH=$(git symbolic-ref HEAD)
+    
+    ORIG_GIT_DIR=$GIT_DIR
+    ORIG_GIT_WORK_TREE=$GIT_WORK_TREE
+    
+    export GIT_DIR=$(pwd)/.git
+    export GIT_WORK_TREE=$directory
+    
+    git symbolic-ref HEAD refs/heads/$git_branch
+    
+    if ! git show-ref refs/remotes/$remote/$git_branch; then
+        # Create an empty branch.
+        echoerr "Warning: $git_branch will be created (it did not exist on the remote)"
+        touch $GIT_WORK_TREE/.gitkeep
+        git add $GIT_WORK_TREE/.gitkeep
+        git commit -m "Initial commit"
+    else
+        # Track the existent branch
+        echo "Checking out current $git_branch"
+        git branch $git_branch -f $remote/$git_branch
+        
+        # Read the tree into the index so the build result is auto-available
+        git read-tree $git_branch
+    fi
+    
+    git add -A
+    git commit -m "$commit_msg"
+    
+    git symbolic-ref HEAD $ORIG_BRANCH
+    
+    export GIT_DIR=$ORIG_GIT_DIR
+    export GIT_WORK_TREE=$ORIG_GIT_WORK_TREE
+}
+
+#
+# we need a portable way of creating temp dirs and files on OSX and Linux
+#
+function Mktemp_Portable() {
+
+  local tmptype=$1 # file or dir
+  local tmppath=${2:-${TMPDIR:-/tmp}} # root path (optional) .. defaults to TMPDIR
+  local caller=$( basename $0 )
+
+  local tmpTemplate="${tmppath}/_tmp-${caller}.XXXXXXXXX"
+
+  if [[ ${tmptype} == "file" ]]; then 
+    theTmp=$( mktemp "${tmpTemplate}" )
+  elif [[ ${tmptype} == "dir" ]]; then 
+    theTmp=$( mktemp -d "${tmpTemplate}" )
+  else 
+    echo "usage: Mktemp_Portable [ file | dir ]" 1>&2 
+    exit 1
+  fi
+  echo ${theTmp}
+
+}
+
+#
+# readlink -f compatible OSX/Linux
+#
+
+function readlink_f() {
+  perl -MCwd -e 'print (Cwd::abs_path shift); print "\n";' "$1"
+}
+
+#
+# Locate SBT or fail
+#
+function which_sbt() {
+
+  if [ -z $SBT ]; then
+      sbtOnPath=$( which sbt )
+      if [ -x "./sbt" ]; then
+          SBT="./sbt"
+      elif [ -x "${sbtOnPath}" ]; then
+          SBT="${sbtOnPath}"
+      else
+          echoerr "sbt is not specified by SBT env var, nor found. Aborting."
+          exit 1
+      fi
+  fi
+  echo ${SBT}
+}
+
+set +o nounset
+
