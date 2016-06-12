@@ -346,10 +346,12 @@ function which_sbt() {
 
   if [ -z $SBT ]; then
       sbtOnPath=$( which sbt )
-      if [ -x "./sbt" ]; then
+      if [ -x "./sbt" -a -z $SBT_PREFER_SYSTEM_SBT_IF_AVAILABLE ]; then
           SBT="./sbt"
       elif [ -x "${sbtOnPath}" ]; then
           SBT="${sbtOnPath}"
+      elif [ -x "./sbt" ]; then
+          SBT="./sbt"
       else
           echoerr "sbt is not specified by SBT env var, nor found. Aborting."
           exit 1
