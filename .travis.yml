@@ -18,7 +18,7 @@ script:
   - RELEASE_TGZ=/tmp/ci-$(cat VERSION).tar.gz
   - tar cvfz ${RELEASE_TGZ} --transform 's/^src\/main\/bash/ci/' src/main/bash
   - tar xvzf ${RELEASE_TGZ} -C /tmp
-  - ./src/main/bash/artifactory-release.sh public-binaries/ci ${RELEASE_TGZ}
+  - ./src/main/bash/ci-release.sh ./src/main/bash/artifactory-release.sh public-binaries/ci ${RELEASE_TGZ}
 
 env:
   global:
