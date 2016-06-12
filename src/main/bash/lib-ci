@@ -346,7 +346,7 @@ function which_sbt() {
 
   if [ -z $SBT ]; then
       sbtOnPath=$( which sbt )
-      if [ -x "./sbt" -a -z $SBT_PREFER_SYSTEM_SBT_IF_AVAILABLE ]; then
+      if [ -x "./sbt" -a -z "${SBT_PREFER_SYSTEM_SBT_IF_AVAILABLE}" ]; then
           SBT="./sbt"
       elif [ -x "${sbtOnPath}" ]; then
           SBT="${sbtOnPath}"
