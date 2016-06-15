@@ -130,3 +130,13 @@ chmod +x .test_lib_ci_atexit_fail.sh
 WVPASS ./.test_lib_ci_atexit_fail.sh
 WVPASS [ ! -e .made_by_atexit ]
 rm .test_lib_ci_atexit_fail.sh
+
+##
+# Test which_sbt function
+##
+
+# Check that which_sbt prints deprecation message
+WVPASS echo $(which_sbt 2>&1) | grep DEPRECATION\ WARNING
+
+# Check that which_sbt prints compatibility warning message
+WVPASS echo $(which_sbt 2>&1) | grep COMPATIBILITY\ WARNING
