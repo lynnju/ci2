@@ -16,6 +16,8 @@ git init --bare $TMPREMOTE || exit 1
 # cp our sample project over to the TMPBASE
 cp -av $TEST_PATH/test-sbt-ci-build-doc ${TMPBASE}
 cd $TMPBASE/test-sbt-ci-build-doc
+ORIGPATH=$PATH
+export PATH=$(pwd):$PATH
 
 ORIG_CI_BRANCH=$CI_BRANCH
 
@@ -41,4 +43,4 @@ WVPASS ${MAIN_PATH}/sbt-ci-build-doc.sh "http://testroot" "http://testsourceroot
 
 # Remove temporary directories
 rm -rf .gitkeep .git $TMPBASE $TMPREMOTE
-
+export PATH=$ORIG_PATH

@@ -29,6 +29,11 @@ import lib-ci
 
 CI_Env_Adapt $(CI_Env_Get)
 
+if [ $(Is_Release) != 0 ]; then
+    echo "$0: Not a release branch; Not publishing. (See lib-ci:Is_Release)"
+    exit 0
+fi
+
 REPO_PATH=$1
 ARTIFACT=$2
 METADATA=$3
@@ -53,15 +58,11 @@ status=$(curl --silent --output /dev/null --write-out "%{http_code}" \
 
 if [ "$status" = "404" ]; then
 
-    if [ $(Is_Release) = 0 ]; then
-        echo "Uploading '$ARTIFACT_NAME':"
-        curl \
-            -H "$ARTIFACTORY_AUTH" \
-            -T "$ARTIFACT" \
-            "$ARTIFACTORY_URL/$REPO_PATH/$ARTIFACT_NAME;$METADATA" || exit 1
-    else
-        echo "Not a release branch; Not publishing. (See lib-ci:Is_Release)"
-    fi
+    echo "Uploading '$ARTIFACT_NAME':"
+    curl \
+        -H "$ARTIFACTORY_AUTH" \
+        -T "$ARTIFACT" \
+        "$ARTIFACTORY_URL/$REPO_PATH/$ARTIFACT_NAME;$METADATA" || exit 1
 
 elif [ "$status" = "200" ]; then
     echo "Error: Artifact named '$ARTIFACT_NAME' already exists!"
